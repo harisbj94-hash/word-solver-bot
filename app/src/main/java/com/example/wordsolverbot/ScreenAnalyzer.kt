@@ -37,6 +37,13 @@ class ScreenAnalyzer {
         return tiles
     }
 
+    private fun isBoxColor(color: Int): Boolean {
+        val r = Color.red(color)
+        val g = Color.green(color)
+        val b = Color.blue(color)
+        return (r + g + b) / 3 > 180
+    }
+
     fun countBoxesPerRow(gridBitmap: Bitmap): List<Int> {
         val w = gridBitmap.width
         val h = gridBitmap.height
@@ -64,4 +71,23 @@ class ScreenAnalyzer {
         if (start != -1) bands.add(start until h)
 
         val counts = mutableListOf<Int>()
-        for (band in bands)
+        for (band in bands) {
+            val midY = (band.first + band.last) / 2
+            var boxCount = 0
+            var inBox = false
+            for (x in 0 until w) {
+                val isBox = isBoxColor(gridBitmap.getPixel(x, midY))
+                if (isBox && !inBox) {
+                    boxCount++
+                    inBox = true
+                } else if (!isBox && inBox) {
+                    inBox = false
+                }
+            }
+            if (boxCount > 0) {
+                counts.add(boxCount)
+            }
+        }
+        return counts
+    }
+}
