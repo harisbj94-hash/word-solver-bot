@@ -5,6 +5,7 @@ import android.os.Bundle
 import android.provider.Settings
 import android.widget.Button
 import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 
 class MainActivity : AppCompatActivity() {
@@ -18,12 +19,24 @@ class MainActivity : AppCompatActivity() {
         }
 
         findViewById<Button>(R.id.btnStart).setOnClickListener {
-            WordSolverService.instance?.startSolving()
+            val service = WordSolverService.instance
+            if (service != null) {
+                service.startSolving()
+                Toast.makeText(this, "Bot Started! Ab Game open karein.", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(this, "Error: Service OFF hai! Pehle Accessibility ON karein.", Toast.LENGTH_LONG).show()
+            }
             updateStatus()
         }
 
         findViewById<Button>(R.id.btnStop).setOnClickListener {
-            WordSolverService.instance?.stopSolving()
+            val service = WordSolverService.instance
+            if (service != null) {
+                service.stopSolving()
+                Toast.makeText(this, "Bot Stopped!", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(this, "Service active nahi hai.", Toast.LENGTH_SHORT).show()
+            }
             updateStatus()
         }
     }
@@ -34,11 +47,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateStatus() {
-        val running = WordSolverService.instance != null
-        val text = if (running) {
-            "Status: accessibility service is ON. Tap Start, then switch to the game."
+        val isConnected = WordSolverService.instance != null
+        val text = if (isConnected) {
+            "Status: Accessibility Service ACTIVE hai ✅\n'Start' dabayein aur game open karein."
         } else {
-            "Status: service not enabled yet. Tap 'Open Accessibility Settings' first."
+            "Status: Service Active nahi hai ❌\nPehle 'Open Accessibility Settings' par click karke Permission ON karein."
         }
         findViewById<TextView>(R.id.statusText).text = text
     }
