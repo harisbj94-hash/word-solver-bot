@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Word Solver Bot</string>
+    <string name="accessibility_service_description">Reads the word puzzle screen and automatically traces letters to solve levels.</string>
+</resources>
