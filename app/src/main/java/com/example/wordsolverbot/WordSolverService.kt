@@ -1,108 +1,89 @@
 package com.example.wordsolverbot
 
-import android.accessibilityservice.AccessibilityService
-import android.accessibilityservice.GestureDescription
 import android.graphics.Bitmap
-import android.graphics.Path
-import android.graphics.Rect
-import android.os.Handler
-import android.os.Looper
-import android.util.Log
-import android.view.Display
-import android.view.accessibility.AccessibilityEvent
+import android.graphics.Color
+import com.google.android.gms.tasks.Tasks
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 
-class WordSolverService : AccessibilityService() {
+data class LetterTile(val char: Char, val x: Int, val y: Int)
 
-    companion object {
-        var instance: WordSolverService? = null
-        private const val TAG = "WordSolverBot"
-    }
+class ScreenAnalyzer {
 
-    private lateinit var wordFinder: WordFinder
-    private val analyzer = ScreenAnalyzer()
-    private val handler = Handler(Looper.getMainLooper())
-    private var running = false
-    private val usedWords = mutableSetOf<String>()
+    private val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
 
-    override fun onServiceConnected() {
-        super.onServiceConnected()
-        instance = this
-        wordFinder = WordFinder(this)
-        Log.i(TAG, "Accessibility service connected")
-    }
-
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
-
-    override fun onInterrupt() {}
-
-    fun startSolving() {
-        if (running) return
-        running = true
-        usedWords.clear()
-        handler.post(tick)
-        Log.i(TAG, "Started solving")
-    }
-
-    fun stopSolving() {
-        running = false
-        handler.removeCallbacks(tick)
-        Log.i(TAG, "Stopped solving")
-    }
-
-    private val tick = object : Runnable {
-        override fun run() {
-            if (!running) return
-            try {
-                solveStep()
-            } catch (e: Exception) {
-                Log.e(TAG, "solveStep failed", e)
-            }
-            handler.postDelayed(this, Config.tickIntervalMs)
-        }
-    }
-
-    private fun solveStep() {
-        takeScreenshot(
-            Display.DEFAULT_DISPLAY,
-            mainExecutor,
-            object : TakeScreenshotCallback {
-                override fun onSuccess(result: ScreenshotResult) {
-                    val hwBitmap = Bitmap.wrapHardwareBuffer(result.hardwareBuffer, result.colorSpace)
-                    result.hardwareBuffer.close()
-                    if (hwBitmap == null) return
-                    val bitmap = hwBitmap.copy(Bitmap.Config.ARGB_8888, false)
-                    processScreenshot(bitmap)
-                }
-
-                override fun onFailure(errorCode: Int) {
-                    Log.w(TAG, "Screenshot failed: $errorCode")
+    fun readWheelLetters(wheelBitmap: Bitmap, offsetX: Int, offsetY: Int): List<LetterTile> {
+        val image = InputImage.fromBitmap(wheelBitmap, 0)
+        val result = Tasks.await(recognizer.process(image))
+        val tiles = mutableListOf<LetterTile>()
+        for (block in result.textBlocks) {
+            for (line in block.lines) {
+                for (element in line.elements) {
+                    val txt = element.text.trim()
+                    if (txt.length == 1 && txt[0].isLetter()) {
+                        val box = element.boundingBox ?: continue
+                        tiles.add(
+                            LetterTile(
+                                txt[0].uppercaseChar(),
+                                offsetX + box.centerX(),
+                                offsetY + box.centerY()
+                            )
+                        )
+                    }
                 }
             }
-        )
+        }
+        return tiles
     }
 
-    private fun processScreenshot(full: Bitmap) {
-        val w = full.width
-        val h = full.height
+    fun countBoxesPerRow(gridBitmap: Bitmap): List<Int> {
+        val w = gridBitmap.width
+        val h = gridBitmap.height
+        val rowHasContent = BooleanArray(h)
 
-        val wheelRect = regionToRect(Config.wheelRegion, w, h)
-        val gridRect = regionToRect(Config.gridRegion, w, h)
-
-        val wheelBitmap = Bitmap.createBitmap(full, wheelRect.left, wheelRect.top, wheelRect.width(), wheelRect.height())
-        val gridBitmap = Bitmap.createBitmap(full, gridRect.left, gridRect.top, gridRect.width(), gridRect.height())
-
-        val tiles = analyzer.readWheelLetters(wheelBitmap, wheelRect.left, wheelRect.top)
-        val rowLengths = analyzer.countBoxesPerRow(gridBitmap)
-
-        if (tiles.isEmpty() || rowLengths.isEmpty()) {
-            Log.d(TAG, "Nothing usable this tick (letters=${tiles.size}, rows=$rowLengths)")
-            return
+        for (y in 0 until h) {
+            var lightCount = 0
+            var x = 0
+            while (x < w) {
+                if (isBoxColor(gridBitmap.getPixel(x, y))) lightCount++
+                x += 2
+            }
+            rowHasContent[y] = lightCount > w / 20
         }
 
-        val letters = tiles.map { it.char }
-        val candidates = wordFinder.findCandidates(letters, rowLengths)
+        val bands = mutableListOf<IntRange>()
+        var start = -1
+        for (y in 0 until h) {
+            if (rowHasContent[y] && start == -1) start = y
+            if (!rowHasContent[y] && start != -1) {
+                bands.add(start until y)
+                start = -1
+            }
+        }
+        if (start != -1) bands.add(start until h)
 
-        for (len in rowLengths) {
-            val options = candidates[len] ?: continue
-            val next = options.firstOrNull { it !in usedWords } ?: continue
-            us
+        val counts = mutableListOf<Int>()
+        for (band in bands) {
+            val midY = (band.first + band.last) / 2
+            var boxes = 0
+            var inBox = false
+            for (x in 0 until w) {
+                val isLight = isBoxColor(gridBitmap.getPixel(x, midY))
+                if (isLight && !inBox) {
+                    boxes++
+                    inBox = true
+                } else if (!isLight) {
+                    inBox = false
+                }
+            }
+            if (boxes > 0) counts.add(boxes)
+        }
+        return counts
+    }
+
+    private fun isBoxColor(pixel: Int): Boolean {
+        val t = Config.boxBrightnessThreshold
+        return Color.red(pixel) > t && Color.green(pixel) > t && Color.blue(pixel) > t
+    }
+}
